@@ -58,6 +58,7 @@ def db_path():
 
 def open_db(path):
     path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.chmod(0o700)  # the index holds conversation text, which Claude Code keeps private
     conn = sqlite3.connect(path, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL")  # the background summarizer writes while the picker reads
@@ -252,7 +253,7 @@ def summarize_pending(summarize, report=None, workers=4):
                 session = todo.get_nowait()
             except Empty:
                 return
-            prompt = f"<transcript>\n{session['text'][:8000]}\n</transcript>\nFolder: {session['cwd']}\n" \
+            prompt = f"<transcript>\n{session['text'][:8000]}\n</transcript>\nFolder: {home_relative(session['cwd'])}\n" \
                      f"Old title: {session['title']}"
             try:
                 summary = " ".join(summarize(prompt).split()).strip('"').rstrip(".")

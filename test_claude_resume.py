@@ -3,6 +3,7 @@ import json
 import os
 import re
 import sqlite3
+import stat
 import tempfile
 import time
 import unittest
@@ -167,6 +168,14 @@ class ClaudeResumeTest(unittest.TestCase):
 
         sessions = claude_resume.search(claude_resume.open_db(self.db_path), [])
         self.assertEqual([s["id"] for s in sessions], ["a3af957e-3098-435b-b7da-3394d6eb8600"])
+
+    def test_main_keeps_its_index_private_to_the_user(self):
+        self.write_session(self.root, "a3af957e-3098-435b-b7da-3394d6eb8600",
+                           [user_prompt(self.root, "add retry to webhook sender")])
+
+        self.run_main(["q"])
+
+        self.assertEqual(stat.S_IMODE(self.db_path.parent.stat().st_mode), 0o700)
 
     def test_main_resumes_chosen_session_from_its_original_directory_when_run_elsewhere(self):
         sub = self.root + "/checkout-api"
@@ -352,6 +361,7 @@ class ClaudeResumeTest(unittest.TestCase):
         self.assertEqual(claude.call_args.kwargs["cwd"], tempfile.gettempdir())
         self.assertRegex(claude.call_args.kwargs["input"],
                          r"(?s)^<transcript>\n.*I'll add exponential backoff to the sender\.\n</transcript>")
+        self.assertIn("\nFolder: ~/src/webshop\n", claude.call_args.kwargs["input"])
         session = self.search(["backoff to webhooks"])[0]
         self.assertEqual(session["summary"], "Add exponential backoff to webhooks")
         self.assertIn("Add exponential backoff to webhooks", claude_resume.format_row(session))
