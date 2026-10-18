@@ -352,7 +352,7 @@ def pick_with_pager(sessions, terms):
 def main(argv=None):
     terms = sys.argv[1:] if argv is None else argv
     if terms and terms[0] in ("-h", "--help"):
-        print("usage: claude-resume [--all] [search terms...]\n       claude-resume --summarize\n\n" + __doc__.strip()
+        print("usage: clauderesume [--all] [search terms...]\n       clauderesume --summarize\n\n" + __doc__.strip()
               + "\n\nPicks with fzf when installed, otherwise pages 20 at a time."
               + "\n--all also shows sessions whose transcript Claude Code deleted."
               + "\nSessions are summarized while you pick; --summarize does it in the foreground (see README).")

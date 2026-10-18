@@ -1,4 +1,4 @@
-# claude-resume
+# clauderesume
 
 Search **all** your Claude Code sessions from anywhere, and resume one from the directory it was
 started in. (`claude --resume` only shows sessions from the exact current directory.)
@@ -13,18 +13,18 @@ From a clone of this repo:
 uv tool install -e .     # or: pipx install -e .   /   pip install -e .
 ```
 
-This puts `claude-resume` on your PATH; `-e` means a `git pull` takes effect without reinstalling.
+This puts `clauderesume` on your PATH; `-e` means a `git pull` takes effect without reinstalling.
 Or skip installing and symlink the script, which runs itself via `uv`:
 
 ```sh
-ln -s "$PWD/claude_resume.py" ~/.local/bin/claude-resume
+ln -s "$PWD/claude_resume.py" ~/.local/bin/clauderesume
 ```
 
 ## Use
 
 ```sh
-claude-resume                  # list every session, newest first
-claude-resume webhook retry    # only sessions whose title or conversation contain all terms
+clauderesume                   # list every session, newest first
+clauderesume webhook retry     # only sessions whose title or conversation contain all terms
 ```
 
 With [fzf](https://github.com/junegunn/fzf) installed, you pick in fzf: type to fuzzy-filter by
@@ -34,7 +34,7 @@ session's directory and runs `claude --resume <id>`; Esc quits. Search terms on 
 narrow the list by full conversation text first.
 
 Without fzf, results show 20 at a time: press enter for more, type a number to resume, or `q` to quit. When output isn't a terminal
-(e.g. `claude-resume | grep webshop`) everything prints at once.
+(e.g. `clauderesume | grep webshop`) everything prints at once.
 
 Sessions are indexed into SQLite (FTS5, trigram) at `~/.config/claude-resume/claude-resume.db`;
 each run only re-reads transcripts that changed. Once indexed, a session's conversation stays
@@ -53,7 +53,7 @@ as soon as it arrives; quitting early just leaves the rest for the next run. Mos
 summarized once, since only the ones you're still working in change.
 Deleted sessions aren't summarized, but keep any summary they got before their transcript went away.
 
-`claude-resume --summarize` does the same in the foreground with progress and errors (the picker
+`clauderesume --summarize` does the same in the foreground with progress and errors (the picker
 stays silent so it doesn't garble the screen).
 
 Configure the provider in `~/.config/claude-resume/claude-resume.conf`:

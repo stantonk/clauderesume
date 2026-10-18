@@ -160,6 +160,13 @@ class ClaudeResumeTest(unittest.TestCase):
         self.assertEqual([s["id"] for s in self.search(["cached", "results"])],
                          ["21d34e80-b880-408b-8595-5ef60a196b92"])
 
+    def test_help_names_the_clauderesume_command(self):
+        with redirect_stdout(io.StringIO()) as out:
+            claude_resume.main(["--help"])
+
+        self.assertTrue(out.getvalue().startswith("usage: clauderesume [--all] [search terms...]\n"))
+        self.assertIn("       clauderesume --summarize\n", out.getvalue())
+
     def test_main_keeps_its_index_in_the_config_directory(self):
         self.write_session(self.root, "a3af957e-3098-435b-b7da-3394d6eb8600",
                            [user_prompt(self.root, "add retry to webhook sender")])
