@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clauderesume"
+version = "0.1.0"
+description = "Search every Claude Code session and resume it from the folder it was started in."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+claude-resume = "claude_resume:main"
+
+[tool.setuptools]
+py-modules = ["claude_resume"]

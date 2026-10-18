@@ -7,6 +7,15 @@ Single-file, zero-dependency Python run via `uv`.
 
 ## Install
 
+From a clone of this repo:
+
+```sh
+uv tool install -e .     # or: pipx install -e .   /   pip install -e .
+```
+
+This puts `claude-resume` on your PATH; `-e` means a `git pull` takes effect without reinstalling.
+Or skip installing and symlink the script, which runs itself via `uv`:
+
 ```sh
 ln -s "$PWD/claude_resume.py" ~/.local/bin/claude-resume
 ```
