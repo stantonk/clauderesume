@@ -2,8 +2,7 @@
 
 ## Changes
 
-- `main` is protected. Put every change on a branch and open a pull request (`gh pr create`).
-  Never push to `main`.
+- Work on a branch and open a pull request; `main` is protected.
 - Keep each pull request to one bounded behavior.
 - Write a failing test before changing `claude_resume.py`, and run `uv run python -m unittest`
   before opening the pull request.
