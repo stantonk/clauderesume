@@ -4,7 +4,7 @@
 
 - Work on a branch and open a pull request; `main` is protected.
 - Keep each pull request to one bounded behavior.
-- Test Driven Development: `uv run python -m unittest`
+- Follow Test Driven Development: `uv run python -m unittest`
 
 ## Code
 
