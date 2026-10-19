@@ -402,9 +402,14 @@ def main(argv=None):
         summarize = None  # --summarize reports config errors; the picker stays quiet
     if summarize:
         summarize_pending(summarize)
-    if sys.stdout.isatty() and shutil.which("fzf"):
+    fzf = shutil.which("fzf")
+    if sys.stdout.isatty() and fzf:
         session = pick_with_fzf(sessions)
     else:
+        if not fzf:
+            print("fzf isn't installed, so here's a numbered list instead. "
+                  "Install fzf (https://github.com/junegunn/fzf) to search as you type.", file=sys.stderr)
+            time.sleep(1)
         session = pick_with_pager(sessions, terms)
     if session is False:
         return 1

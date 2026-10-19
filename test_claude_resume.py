@@ -255,6 +255,25 @@ class ClaudeResumeTest(unittest.TestCase):
         self.assertEqual(listed_numbers(out), list(range(1, 21)))
         execvp.assert_called_once_with("claude", ["claude", "--resume", ids[1]])
 
+    def test_main_warns_and_pauses_before_paging_when_fzf_is_missing(self):
+        self.write_numbered_sessions(3)
+
+        with redirect_stderr(io.StringIO()) as err:
+            self.run_main(["q"])
+
+        self.assertIn("fzf isn't installed", err.getvalue())
+        self.sleep.assert_called_once_with(1)
+
+    def test_main_does_not_warn_about_fzf_when_it_is_installed(self):
+        self.write_numbered_sessions(3)
+
+        with mock.patch("subprocess.run", return_value=CompletedProcess([], 130, stdout="")), \
+                redirect_stderr(io.StringIO()) as err:
+            self.run_main([], fzf="/opt/homebrew/bin/fzf")
+
+        self.assertNotIn("fzf", err.getvalue())
+        self.sleep.assert_not_called()
+
     def test_main_quits_on_q(self):
         self.write_numbered_sessions(25)
 
@@ -560,6 +579,7 @@ class ClaudeResumeTest(unittest.TestCase):
                 mock.patch("builtins.input", side_effect=answer), \
                 mock.patch("os.chdir") as chdir, \
                 mock.patch("os.execvp") as execvp, \
+                mock.patch("time.sleep") as self.sleep, \
                 redirect_stdout(TerminalOutput()) as out:
             status = claude_resume.main(list(argv))
         return out.getvalue(), prompts, execvp, chdir, status
