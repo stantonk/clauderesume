@@ -262,6 +262,28 @@ class ClaudeResumeTest(unittest.TestCase):
             self.run_main(["q"])
 
         self.assertIn("fzf isn't installed", err.getvalue())
+        self.assertIn("fzf_warning = off", err.getvalue())
+        self.sleep.assert_called_once_with(1)
+
+    def test_main_skips_the_fzf_warning_when_turned_off_in_the_conf(self):
+        self.write_numbered_sessions(3)
+        self.write_conf("[summarize]\nprovider = none\n\n[picker]\nfzf_warning = off\n")
+
+        with redirect_stderr(io.StringIO()) as err:
+            out, _, _, _, _ = self.run_main(["q"])
+
+        self.assertNotIn("fzf", err.getvalue())
+        self.sleep.assert_not_called()
+        self.assertEqual(listed_numbers(out), [1, 2, 3])
+
+    def test_main_keeps_the_fzf_warning_when_the_setting_is_not_a_boolean(self):
+        self.write_numbered_sessions(3)
+        self.write_conf("[summarize]\nprovider = none\n\n[picker]\nfzf_warning = quiet\n")
+
+        with redirect_stderr(io.StringIO()) as err:
+            self.run_main(["q"])
+
+        self.assertIn("fzf isn't installed", err.getvalue())
         self.sleep.assert_called_once_with(1)
 
     def test_main_does_not_warn_about_fzf_when_it_is_installed(self):

@@ -278,6 +278,15 @@ def load_summarizer():
     return summarizer(load_settings(app_dir() / "claude-resume.conf"))
 
 
+def fzf_warning_enabled():
+    parser = configparser.ConfigParser()
+    parser.read(app_dir() / "claude-resume.conf")
+    try:
+        return parser.getboolean("picker", "fzf_warning", fallback=True)
+    except ValueError:
+        return True
+
+
 def format_row(session):
     title = session["summary"] or session["title"]
     title = title if len(title) <= TITLE_WIDTH else title[:TITLE_WIDTH - 1] + "…"
@@ -406,9 +415,10 @@ def main(argv=None):
     if sys.stdout.isatty() and fzf:
         session = pick_with_fzf(sessions)
     else:
-        if not fzf:
+        if not fzf and fzf_warning_enabled():
             print("fzf isn't installed, so here's a numbered list instead. "
-                  "Install fzf (https://github.com/junegunn/fzf) to search as you type.", file=sys.stderr)
+                  "Install fzf (https://github.com/junegunn/fzf) to search as you type, "
+                  "or set fzf_warning = off under [picker] in claude-resume.conf to hide this.", file=sys.stderr)
             time.sleep(1)
         session = pick_with_pager(sessions, terms)
     if session is False:

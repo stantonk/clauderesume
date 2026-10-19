@@ -73,6 +73,13 @@ url = http://localhost:11434     # default
 
 `provider = none` turns summaries off.
 
+To skip the note and pause when fzf isn't installed:
+
+```ini
+[picker]
+fzf_warning = off
+```
+
 ## Test
 
 ```sh
