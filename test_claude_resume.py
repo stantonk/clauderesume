@@ -439,30 +439,21 @@ class ClaudeResumeTest(unittest.TestCase):
         self.assertEqual(plain, [row.replace("\x1b[38;5;208m", "").replace("\x1b[35m", "").replace("\x1b[0m", "")
                                  for row in colored])
 
-    def test_main_warns_and_pages_when_fzf_is_older_than_0_70(self):
-        self.write_numbered_sessions(3)
+    def test_main_picks_with_fzf_without_the_folder_toggle_when_fzf_is_older_than_0_70(self):
+        self.write_session(self.root, "a3af957e-3098-435b-b7da-3394d6eb8600",
+                           [user_prompt(self.root, "add retry to webhook sender")])
+        picked = "a3af957e-3098-435b-b7da-3394d6eb8600\t01-01 00:16  add retry to webhook sender\n"
 
-        with mock.patch("subprocess.run", side_effect=fake_fzf("0.44.1 (debian)")) as fzf, \
+        with mock.patch("subprocess.run", side_effect=fake_fzf("0.44.1 (debian)", picked=picked)) as fzf, \
                 redirect_stderr(io.StringIO()) as err:
-            out, _, _, _, _ = self.run_main(["q"], fzf="/usr/bin/fzf")
+            _, prompts, execvp, _, _ = self.run_main([], fzf="/usr/bin/fzf")
 
-        self.assertEqual(listed_numbers(out), [1, 2, 3])
-        self.assertIn("fzf 0.44.1 is older than 0.70, so here's a numbered list instead. Update fzf", err.getvalue())
-        self.assertIn("fzf_warning = off", err.getvalue())
-        self.sleep.assert_called_once_with(1)
-        fzf.assert_called_once_with(["/usr/bin/fzf", "--version"], capture_output=True, text=True)
-
-    def test_main_skips_the_old_fzf_warning_when_turned_off_in_the_conf(self):
-        self.write_numbered_sessions(3)
-        self.write_conf("[summarize]\nprovider = none\n\n[picker]\nfzf_warning = off\n")
-
-        with mock.patch("subprocess.run", side_effect=fake_fzf("0.44.1 (debian)")), \
-                redirect_stderr(io.StringIO()) as err:
-            out, _, _, _, _ = self.run_main(["q"], fzf="/usr/bin/fzf")
-
-        self.assertEqual(listed_numbers(out), [1, 2, 3])
+        args = fzf.call_args.args[0]
+        self.assertEqual(args[args.index("--with-nth") + 1], "3")
+        self.assertNotIn("--bind", args)
         self.assertNotIn("fzf", err.getvalue())
-        self.sleep.assert_not_called()
+        self.assertEqual(prompts, [])
+        execvp.assert_called_once_with("claude", ["claude", "--resume", "a3af957e-3098-435b-b7da-3394d6eb8600"])
 
     def test_main_picks_with_fzf_when_installed_and_resumes_the_selection(self):
         sub = self.root + "/checkout-api"

@@ -23,7 +23,7 @@ from pathlib import Path
 
 PAGE_SIZE = 20
 NAME_WIDTH = 32
-FZF_MIN_VERSION = (0, 70)  # change-with-nth, which switches the folder column
+FZF_MIN_VERSION = (0, 70)  # change-with-nth, which the ctrl-d folder toggle uses
 TITLE_WIDTH = 50
 # ANSI codes for the colors that /color sets in Claude Code.
 COLORS = {"red": "31", "green": "32", "yellow": "33", "blue": "34", "purple": "35", "cyan": "36",
@@ -369,15 +369,16 @@ def print_preview(conn, session_id):
     print(session["text"])
 
 
-def pick_with_fzf(sessions):
+def pick_with_fzf(sessions, folder_toggle):
     """Returns the chosen session, or None if fzf was cancelled."""
     preview = f"{shlex.quote(sys.executable)} {shlex.quote(os.path.abspath(__file__))} --preview {{1}}"
     # Field 2 is the row with the full folder path, field 3 the row with the folder name; ctrl-d switches them.
     rows = "".join(f"{s['id']}\t{format_row(s, color=True, full_path=True)}\t{format_row(s, color=True)}\n"
                    for s in sessions)
+    toggle = ["--bind", "ctrl-d:change-with-nth(2|3)"] if folder_toggle else []
     result = subprocess.run(
-        ["fzf", "--ansi", "--delimiter", "\t", "--with-nth", "3", "--bind", "ctrl-d:change-with-nth(2|3)",
-         "--tiebreak", "index", "--prompt", "resume> ", "--preview", preview, "--preview-window", "down,40%,wrap"],
+        ["fzf", "--ansi", "--delimiter", "\t", "--with-nth", "3", *toggle, "--tiebreak", "index",
+         "--prompt", "resume> ", "--preview", preview, "--preview-window", "down,40%,wrap"],
         input=rows, stdout=subprocess.PIPE, text=True)
     chosen = result.stdout.split("\t", 1)[0] if result.returncode == 0 else None
     return next((s for s in sessions if s["id"] == chosen), None)
@@ -467,14 +468,12 @@ def main(argv=None):
     if summarize:
         summarize_pending(summarize)
     fzf = shutil.which("fzf")
-    version = fzf_version(fzf) if fzf and sys.stdout.isatty() else None
-    if version and has_folder_toggle(version):
-        session = pick_with_fzf(sessions)
+    if sys.stdout.isatty() and fzf:
+        session = pick_with_fzf(sessions, has_folder_toggle(fzf_version(fzf)))
     else:
-        if fzf_warning_enabled() and (not fzf or version):
-            problem = f"fzf {version} is older than 0.70" if fzf else "fzf isn't installed"
-            print(f"{problem}, so here's a numbered list instead. "
-                  f"{'Update' if fzf else 'Install'} fzf (https://github.com/junegunn/fzf) to search as you type, "
+        if not fzf and fzf_warning_enabled():
+            print("fzf isn't installed, so here's a numbered list instead. "
+                  "Install fzf (https://github.com/junegunn/fzf) to search as you type, "
                   "or set fzf_warning = off under [picker] in claude-resume.conf to hide this.", file=sys.stderr)
             time.sleep(1)
         session = pick_with_pager(sessions, terms)
