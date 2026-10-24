@@ -22,7 +22,7 @@ from queue import SimpleQueue
 from pathlib import Path
 
 PAGE_SIZE = 20
-NAME_WIDTH = 20
+NAME_WIDTH = 32
 TITLE_WIDTH = 50
 # ANSI codes for the colors that /color sets in Claude Code.
 COLORS = {"red": "31", "green": "32", "yellow": "33", "blue": "34", "purple": "35", "cyan": "36",
@@ -310,15 +310,16 @@ def fzf_warning_enabled():
         return True
 
 
-def format_row(session, color=False):
+def format_row(session, color=False, full_path=False):
     name = truncate(session["name"] or "", NAME_WIDTH)
     padding = " " * (NAME_WIDTH - len(name))
     if color and session["color"] in COLORS:
         name = f"\x1b[{COLORS[session['color']]}m{name}\x1b[0m"
     title = truncate(session["summary"] or session["title"], TITLE_WIDTH)
-    when = time.strftime("%Y-%m-%d %H:%M", time.localtime(session["mtime"]))
+    when = time.strftime("%m-%d %H:%M", time.localtime(session["mtime"]))
+    folder = home_relative(session["cwd"]) if full_path else Path(session["cwd"]).name
     deleted = "  (deleted)" if session["deleted"] else ""
-    return f"{when}  {name}{padding}  {title:<{TITLE_WIDTH}}  [{home_relative(session['cwd'])}]{deleted}"
+    return f"{when}  {name}{padding}  {title:<{TITLE_WIDTH}}  [{folder}]{deleted}"
 
 
 def truncate(text, width):
@@ -329,8 +330,8 @@ def home_relative(path):
     return path.replace(str(Path.home()), "~", 1)
 
 
-def print_session(number, session, terms):
-    print(f"{number:>3}  {format_row(session, color=sys.stdout.isatty())}")
+def print_session(number, session, terms, full_path=False):
+    print(f"{number:>3}  {format_row(session, color=sys.stdout.isatty(), full_path=full_path)}")
     label = (session["summary"] or session["title"]).lower()
     if terms and not all(term.lower() in label for term in terms):
         print(f"       {snippet(session, terms)}")
@@ -357,30 +358,40 @@ def print_preview(conn, session_id):
 def pick_with_fzf(sessions):
     """Returns the chosen session, or None if fzf was cancelled."""
     preview = f"{shlex.quote(sys.executable)} {shlex.quote(os.path.abspath(__file__))} --preview {{1}}"
+    # Field 2 is the row with the full folder path, field 3 the row with the folder name; ctrl-d switches them.
+    rows = "".join(f"{s['id']}\t{format_row(s, color=True, full_path=True)}\t{format_row(s, color=True)}\n"
+                   for s in sessions)
     result = subprocess.run(
-        ["fzf", "--ansi", "--delimiter", "\t", "--with-nth", "2..", "--tiebreak", "index", "--prompt", "resume> ",
-         "--preview", preview, "--preview-window", "down,40%,wrap"],
-        input="".join(f"{s['id']}\t{format_row(s, color=True)}\n" for s in sessions), stdout=subprocess.PIPE, text=True)
+        ["fzf", "--ansi", "--delimiter", "\t", "--with-nth", "3", "--bind", "ctrl-d:change-with-nth(2|3)",
+         "--tiebreak", "index", "--prompt", "resume> ", "--preview", preview, "--preview-window", "down,40%,wrap"],
+        input=rows, stdout=subprocess.PIPE, text=True)
     chosen = result.stdout.split("\t", 1)[0] if result.returncode == 0 else None
     return next((s for s in sessions if s["id"] == chosen), None)
 
 
 def pick_with_pager(sessions, terms):
     """Returns the chosen session, None to quit, or False for an invalid choice."""
-    shown = 0
+    page = 0
+    full_path = False
     while True:
-        for number in range(shown + 1, min(shown + PAGE_SIZE, len(sessions)) + 1):
-            print_session(number, sessions[number - 1], terms)
-        shown = min(shown + PAGE_SIZE, len(sessions))
+        shown = min(page + PAGE_SIZE, len(sessions))
+        for number in range(page + 1, shown + 1):
+            print_session(number, sessions[number - 1], terms, full_path)
         more = shown < len(sessions)
+        folders = "folder names" if full_path else "full paths"
         try:
-            choice = input(f"Resume which? [1-{shown}, {'enter for more, q to quit' if more else 'enter to quit'}]: ")
+            choice = input(f"Resume which? [1-{shown}, d for {folders}, "
+                           f"{'enter for more, q to quit' if more else 'enter to quit'}]: ")
         except (EOFError, KeyboardInterrupt):
             return None
         choice = choice.strip().lower()
         if choice == "q" or (not choice and not more):
             return None
-        if choice:
+        if choice == "d":
+            full_path = not full_path
+        elif not choice:
+            page = shown
+        else:
             break
     if not choice.isdigit() or not 1 <= int(choice) <= len(sessions):
         print(f"Invalid choice: {choice}", file=sys.stderr)

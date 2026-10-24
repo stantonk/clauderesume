@@ -28,12 +28,12 @@ clauderesume webhook retry     # only sessions whose title or conversation conta
 ```
 
 With [fzf](https://github.com/junegunn/fzf) installed, you pick in fzf: type to fuzzy-filter by
-date, session name (from `/rename`, shown in its `/color`), title and folder, with a preview of the folder's
+date, session name (from `/rename`, shown in its `/color`), title and last folder name, with a preview of the folder's
 README.md, or the session's conversation when it has none. Enter `cd`s into that
-session's directory and runs `claude --resume <id>`; Esc quits. Search terms on the command line
-narrow the list by full conversation text first.
+session's directory and runs `claude --resume <id>`; Esc quits. Ctrl-D switches between the folder
+name and its full path. Search terms on the command line narrow the list by full conversation text first.
 
-Without fzf, it says so, pauses a second, then shows results 20 at a time: press enter for more, type a number to resume, or `q` to quit. When output isn't a terminal
+Without fzf, it says so, pauses a second, then shows results 20 at a time: press enter for more, type a number to resume, `d` to switch between folder names and full paths, or `q` to quit. When output isn't a terminal
 (e.g. `clauderesume | grep webshop`) everything prints at once.
 
 Sessions are indexed into SQLite (FTS5, trigram) at `~/.config/claude-resume/claude-resume.db`;

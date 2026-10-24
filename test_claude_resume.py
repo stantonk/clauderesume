@@ -217,7 +217,7 @@ class ClaudeResumeTest(unittest.TestCase):
 
         out, _, execvp, chdir, _ = self.run_main(["1"], ["timezone"])
 
-        self.assertIn("[~/src/webshop/checkout-api]", out)
+        self.assertIn("[checkout-api]", out)
         self.assertNotIn("webhook docs", out)
         chdir.assert_called_once_with(sub)
         execvp.assert_called_once_with("claude", ["claude", "--resume", "6e2738aa-7c4c-4b94-b9af-05c33c3a42ab"])
@@ -230,7 +230,7 @@ class ClaudeResumeTest(unittest.TestCase):
         with redirect_stderr(io.StringIO()) as err:
             out, _, execvp, chdir, status = self.run_main(["1"], ["--all"])
 
-        self.assertRegex(out, r"what's left on the migration +\[~/src/search-prototype\]  \(deleted\)")
+        self.assertRegex(out, r"what's left on the migration +\[search-prototype\]  \(deleted\)")
         self.assertIn("transcript was deleted", err.getvalue())
         self.assertEqual(status, 1)
         chdir.assert_not_called()
@@ -270,6 +270,26 @@ class ClaudeResumeTest(unittest.TestCase):
         self.assertNotIn("enter for more", prompts[1])
         self.assertEqual(listed_numbers(out), list(range(1, 26)))
         execvp.assert_called_once_with("claude", ["claude", "--resume", ids[22]])
+
+    def test_main_switches_between_last_folder_name_and_full_path_on_d(self):
+        sub = self.root + "/checkout-api"
+        self.write_session(sub, "6e2738aa-7c4c-4b94-b9af-05c33c3a42ab",
+                           [user_prompt(sub, "fix timezone bug in invoice dates")])
+
+        out, prompts, execvp, _, _ = self.run_main(["d", "d", "1"])
+
+        self.assertEqual([line[line.rindex("["):] for line in out.splitlines()],
+                         ["[checkout-api]", "[~/src/webshop/checkout-api]", "[checkout-api]"])
+        self.assertIn("d for full paths", prompts[0])
+        self.assertIn("d for folder names", prompts[1])
+        execvp.assert_called_once_with("claude", ["claude", "--resume", "6e2738aa-7c4c-4b94-b9af-05c33c3a42ab"])
+
+    def test_main_shows_the_same_page_again_after_d(self):
+        self.write_numbered_sessions(25)
+
+        out, _, _, _, _ = self.run_main(["", "d", "q"])
+
+        self.assertEqual(listed_numbers(out), list(range(1, 26)) + list(range(21, 26)))
 
     def test_main_shows_only_first_page_when_choosing_from_it(self):
         ids = self.write_numbered_sessions(25)
@@ -346,11 +366,35 @@ class ClaudeResumeTest(unittest.TestCase):
             self.root, "the nightly export job fails when a customer has no billing address")],
             mtime=1000)
 
-        with mock.patch.dict(os.environ, {"HOME": "/Users/alex"}):
-            rows = [claude_resume.format_row(s) for s in self.search()]
+        rows = [claude_resume.format_row(s) for s in self.search()]
 
-        self.assertEqual({row.index("[~/src/webshop]") for row in rows}, {18 + 20 + 2 + 50 + 2})
+        self.assertEqual({row.index("[webshop]") for row in rows}, {13 + 32 + 2 + 50 + 2})
         self.assertIn("the nightly export job fails when a customer has …", rows[1])
+
+    def test_rows_show_only_the_last_part_of_the_folder(self):
+        sub = self.root + "/checkout-api"
+        self.write_session(sub, "a", [user_prompt(sub, "fix timezone bug in invoice dates")])
+
+        row = claude_resume.format_row(self.search()[0])
+
+        self.assertTrue(row.endswith("  [checkout-api]"), row)
+
+    def test_rows_show_the_full_folder_path_when_asked(self):
+        sub = self.root + "/checkout-api"
+        self.write_session(sub, "a", [user_prompt(sub, "fix timezone bug in invoice dates")])
+
+        with mock.patch.dict(os.environ, {"HOME": "/Users/alex"}):
+            row = claude_resume.format_row(self.search()[0], full_path=True)
+
+        self.assertTrue(row.endswith("  [~/src/webshop/checkout-api]"), row)
+
+    def test_rows_start_with_month_day_and_time_without_the_year(self):
+        self.write_session(self.root, "a", [user_prompt(self.root, "add retries")],
+                           mtime=time.mktime((2026, 3, 14, 9, 5, 0, 0, 0, -1)))
+
+        row = claude_resume.format_row(self.search()[0])
+
+        self.assertTrue(row.startswith("03-14 09:05  "), row)
 
     def test_rows_show_the_session_name_padded_or_truncated_before_the_title(self):
         self.write_session(self.root, "a", [
@@ -358,14 +402,14 @@ class ClaudeResumeTest(unittest.TestCase):
             user_prompt(self.root, "add retries"),
         ], mtime=2000)
         self.write_session(self.root, "b", [
-            {"type": "agent-name", "agentName": "nightly-export-billing-address", "sessionId": "b"},
+            {"type": "agent-name", "agentName": "nightly-export-fails-without-billing-address", "sessionId": "b"},
             user_prompt(self.root, "the nightly export job fails"),
         ], mtime=1000)
 
         rows = [claude_resume.format_row(s) for s in self.search()]
 
-        self.assertEqual([row[18:18 + 20 + 2] for row in rows],
-                         ["webhook-retry         ", "nightly-export-bill…  "])
+        self.assertEqual([row[13:13 + 32 + 2] for row in rows],
+                         ["webhook-retry" + " " * 21, "nightly-export-fails-without-bi…  "])
 
     def test_rows_show_the_session_name_in_its_color_only_when_asked(self):
         self.write_session(self.root, "a", [
@@ -384,12 +428,14 @@ class ClaudeResumeTest(unittest.TestCase):
         ], mtime=500)
         sessions = self.search()
 
-        colored = [claude_resume.format_row(s, color=True)[18:] for s in sessions]
-        plain = [claude_resume.format_row(s)[18:] for s in sessions]
+        colored = [claude_resume.format_row(s, color=True)[13:] for s in sessions]
+        plain = [claude_resume.format_row(s)[13:] for s in sessions]
 
-        self.assertEqual(colored, ["\x1b[38;5;208mwebhook-retry\x1b[0m         add retries" + " " * 41 + "[" + self.root + "]",
-                                   "\x1b[35minvoice-fix\x1b[0m           fix it" + " " * 46 + "[" + self.root + "]",
-                                   "build-docs            explain the build script" + " " * 28 + "[" + self.root + "]"])
+        self.assertEqual(colored, [
+            "\x1b[38;5;208mwebhook-retry\x1b[0m" + " " * 21 + "add retries" + " " * 41 + "[webshop]",
+            "\x1b[35minvoice-fix\x1b[0m" + " " * 23 + "fix it" + " " * 46 + "[webshop]",
+            "build-docs" + " " * 24 + "explain the build script" + " " * 28 + "[webshop]",
+        ])
         self.assertEqual(plain, [row.replace("\x1b[38;5;208m", "").replace("\x1b[35m", "").replace("\x1b[0m", "")
                                  for row in colored])
 
@@ -399,16 +445,21 @@ class ClaudeResumeTest(unittest.TestCase):
                            [user_prompt(self.root, "add retry to webhook sender")], mtime=1000)
         self.write_session(sub, "6e2738aa-7c4c-4b94-b9af-05c33c3a42ab",
                            [user_prompt(sub, "fix timezone bug in invoice dates")], mtime=2000)
-        picked = "a3af957e-3098-435b-b7da-3394d6eb8600\t1970-01-01 00:16  add retry to webhook sender\n"
+        picked = "a3af957e-3098-435b-b7da-3394d6eb8600\t01-01 00:16  add retry to webhook sender\n"
 
         with mock.patch("subprocess.run", return_value=CompletedProcess([], 0, stdout=picked)) as fzf:
             _, prompts, execvp, chdir, _ = self.run_main([], fzf="/opt/homebrew/bin/fzf")
 
-        lines = fzf.call_args.kwargs["input"].splitlines()
-        self.assertEqual([line.split("\t")[0] for line in lines],
+        lines = [line.split("\t") for line in fzf.call_args.kwargs["input"].splitlines()]
+        self.assertEqual([fields[0] for fields in lines],
                          ["6e2738aa-7c4c-4b94-b9af-05c33c3a42ab", "a3af957e-3098-435b-b7da-3394d6eb8600"])
-        self.assertIn("fix timezone bug in invoice dates", lines[0].split("\t")[1])
-        self.assertIn("--ansi", fzf.call_args.args[0])
+        self.assertEqual([(fields[1][fields[1].rindex("["):], fields[2][fields[2].rindex("["):]) for fields in lines],
+                         [("[~/src/webshop/checkout-api]", "[checkout-api]"), ("[~/src/webshop]", "[webshop]")])
+        self.assertIn("fix timezone bug in invoice dates", lines[0][2])
+        args = fzf.call_args.args[0]
+        self.assertIn("--ansi", args)
+        self.assertEqual(args[args.index("--with-nth") + 1], "3")
+        self.assertEqual(args[args.index("--bind") + 1], "ctrl-d:change-with-nth(2|3)")
         self.assertEqual(prompts, [])
         chdir.assert_called_once_with(self.root)
         execvp.assert_called_once_with("claude", ["claude", "--resume", "a3af957e-3098-435b-b7da-3394d6eb8600"])
