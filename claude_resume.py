@@ -34,6 +34,7 @@ SUMMARY_PROMPT = ("You write titles for Claude Code session transcripts. The use
                   "topic, like \"Fix flaky login test\" or \"Add CSV export to reports\". "
                   "Don't mention Claude or the user.")
 
+INDEX_VERSION = 1
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
@@ -70,15 +71,22 @@ def open_db(path):
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL")  # the background summarizer writes while the picker reads
     conn.executescript(SCHEMA)
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(sessions)")}
-    if "summary_mtime" not in columns:
-        conn.execute("ALTER TABLE sessions ADD COLUMN summary_mtime REAL")
-    if "color" not in columns:
-        conn.execute("ALTER TABLE sessions ADD COLUMN name TEXT")
-        conn.execute("ALTER TABLE sessions ADD COLUMN color TEXT")
-        conn.execute("UPDATE sessions SET source_mtime = NULL")  # reread transcripts to find names and colors
-        conn.commit()
+    if conn.execute("PRAGMA user_version").fetchone()[0] < INDEX_VERSION:
+        migrate(conn)
     return conn
+
+
+def migrate(conn):
+    """Brings an index from an earlier version up to INDEX_VERSION, one run at a time."""
+    conn.execute("BEGIN IMMEDIATE")
+    if conn.execute("PRAGMA user_version").fetchone()[0] < INDEX_VERSION:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(sessions)")}
+        for column, kind in (("summary_mtime", "REAL"), ("name", "TEXT"), ("color", "TEXT")):
+            if column not in columns:
+                conn.execute(f"ALTER TABLE sessions ADD COLUMN {column} {kind}")
+        conn.execute("UPDATE sessions SET source_mtime = NULL")  # reread transcripts to find names and colors
+        conn.execute(f"PRAGMA user_version = {INDEX_VERSION}")
+    conn.commit()
 
 
 def load_session(path):
@@ -117,12 +125,13 @@ def load_session(path):
                     texts.append(text)
     if not texts or not cwd:
         return None
-    title = custom_title or ai_title or first_prompt or "(untitled)"
+    name = name or custom_title
+    title = ai_title or first_prompt or name or "(untitled)"
     return {
         "id": path.stem,
         "cwd": cwd,
         "title": " ".join(title.split())[:80],
-        "name": name or custom_title,
+        "name": " ".join(name.split()) if name else None,
         "color": color,
         "text": "\n".join(" ".join(text.split()) for text in texts if text.strip()),
         "mtime": path.stat().st_mtime,
@@ -172,7 +181,7 @@ def save(conn, session, source_mtime):
     rowid, summary = conn.execute("SELECT rowid, summary FROM sessions WHERE id = ?", (session["id"],)).fetchone()
     conn.execute("DELETE FROM search WHERE rowid = ?", (rowid,))
     conn.execute("INSERT INTO search (rowid, title, summary, text) VALUES (?, ?, ?, ?)",
-                 (rowid, session["title"], summary, session["text"]))
+                 (rowid, " ".join(filter(None, [session["name"], session["title"]])), summary, session["text"]))
 
 
 def sync(conn, config):
@@ -387,7 +396,7 @@ def pick_with_fzf(sessions, folder_toggle):
 def pick_with_pager(sessions, terms):
     """Returns the chosen session, None to quit, or False for an invalid choice."""
     page = 0
-    full_path = False
+    full_path = not sys.stdout.isatty()  # output for grep or a file keeps the whole path
     while True:
         shown = min(page + PAGE_SIZE, len(sessions))
         for number in range(page + 1, shown + 1):
@@ -459,7 +468,7 @@ def main(argv=None):
         return 1
     if not sys.stdin.isatty():
         for number, session in enumerate(sessions, 1):
-            print_session(number, session, terms)
+            print_session(number, session, terms, full_path=True)
         return 0
     try:
         summarize = load_summarizer()

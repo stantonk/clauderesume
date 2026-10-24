@@ -54,7 +54,7 @@ class ClaudeResumeTest(unittest.TestCase):
 
         self.assertEqual(self.search(), [])
 
-    def test_title_prefers_custom_then_latest_ai_title_then_first_prompt(self):
+    def test_title_prefers_latest_ai_title_then_first_prompt_then_name(self):
         self.write_session(self.root, "a", [
             {"type": "ai-title", "aiTitle": "Old title", "sessionId": "a"},
             {"type": "ai-title", "aiTitle": "Webhook retry logic", "sessionId": "a"},
@@ -69,14 +69,38 @@ class ClaudeResumeTest(unittest.TestCase):
             user_prompt(self.root, "<command-name>/init</command-name>"),
             user_prompt(self.root, "explain the build script"),
         ])
+        self.write_session(self.root, "d", [
+            {"type": "custom-title", "customTitle": "release-notes", "sessionId": "d"},
+            user_prompt(self.root, "<command-name>/release-notes</command-name>"),
+        ])
 
         titles = {s["id"]: s["title"] for s in self.search()}
 
         self.assertEqual(titles, {
             "a": "Webhook retry logic",
-            "b": "invoice-timezone-fix",
+            "b": "Invoice timezones",
             "c": "explain the build script",
+            "d": "release-notes",
         })
+
+    def test_search_matches_the_session_name(self):
+        self.write_session(self.root, "a", [
+            {"type": "custom-title", "customTitle": "webhook-retry", "sessionId": "a"},
+            {"type": "agent-name", "agentName": "webhook-backoff", "sessionId": "a"},
+            {"type": "ai-title", "aiTitle": "Add retries to sender", "sessionId": "a"},
+            user_prompt(self.root, "add retries"),
+        ])
+        self.write_session(self.root, "b", [user_prompt(self.root, "fix it")])
+
+        self.assertEqual([s["id"] for s in self.search(["backoff"])], ["a"])
+
+    def test_name_has_its_whitespace_collapsed(self):
+        self.write_session(self.root, "a", [
+            {"type": "agent-name", "agentName": "invoice\tfix\n  next ", "sessionId": "a"},
+            user_prompt(self.root, "fix it"),
+        ])
+
+        self.assertEqual([s["name"] for s in self.search()], ["invoice fix next"])
 
     def test_name_and_color_come_from_the_latest_rename_and_color(self):
         self.write_session(self.root, "a", [
@@ -360,6 +384,32 @@ class ClaudeResumeTest(unittest.TestCase):
         self.assertEqual(listed_numbers(out.getvalue()), list(range(1, 26)))
         prompt.assert_not_called()
 
+    def test_main_prints_the_full_folder_path_when_not_a_terminal(self):
+        sub = self.root + "/checkout-api"
+        self.write_session(sub, "6e2738aa-7c4c-4b94-b9af-05c33c3a42ab",
+                           [user_prompt(sub, "fix timezone bug in invoice dates")])
+
+        with mock.patch.dict(os.environ, self.env()), \
+                mock.patch("sys.stdin.isatty", return_value=False), \
+                redirect_stdout(io.StringIO()) as out:
+            claude_resume.main([])
+
+        self.assertTrue(out.getvalue().endswith("  [~/src/webshop/checkout-api]\n"), out.getvalue())
+
+    def test_main_pages_with_the_full_folder_path_when_output_goes_to_a_pipe(self):
+        sub = self.root + "/checkout-api"
+        self.write_session(sub, "6e2738aa-7c4c-4b94-b9af-05c33c3a42ab",
+                           [user_prompt(sub, "fix timezone bug in invoice dates")])
+
+        with mock.patch.dict(os.environ, self.env()), \
+                mock.patch("sys.stdin.isatty", return_value=True), \
+                mock.patch("builtins.input", return_value="q"), \
+                redirect_stderr(io.StringIO()), \
+                redirect_stdout(io.StringIO()) as out:
+            claude_resume.main([])
+
+        self.assertTrue(out.getvalue().endswith("  [~/src/webshop/checkout-api]\n"), out.getvalue())
+
     def test_rows_align_folders_by_padding_or_truncating_titles(self):
         self.write_session(self.root, "a", [user_prompt(self.root, "looks good")], mtime=2000)
         self.write_session(self.root, "b", [user_prompt(
@@ -442,7 +492,8 @@ class ClaudeResumeTest(unittest.TestCase):
     def test_main_picks_with_fzf_without_the_folder_toggle_when_fzf_is_older_than_0_70(self):
         self.write_session(self.root, "a3af957e-3098-435b-b7da-3394d6eb8600",
                            [user_prompt(self.root, "add retry to webhook sender")])
-        picked = "a3af957e-3098-435b-b7da-3394d6eb8600\t01-01 00:16  add retry to webhook sender\n"
+        picked = fzf_line("a3af957e-3098-435b-b7da-3394d6eb8600", "01-01 00:16",
+                          "add retry to webhook sender", "~/src/webshop", "webshop")
 
         with mock.patch("subprocess.run", side_effect=fake_fzf("0.44.1 (debian)", picked=picked)) as fzf, \
                 redirect_stderr(io.StringIO()) as err:
@@ -455,13 +506,29 @@ class ClaudeResumeTest(unittest.TestCase):
         self.assertEqual(prompts, [])
         execvp.assert_called_once_with("claude", ["claude", "--resume", "a3af957e-3098-435b-b7da-3394d6eb8600"])
 
+    def test_main_picks_with_fzf_without_the_folder_toggle_when_fzf_prints_no_version(self):
+        self.write_session(self.root, "a3af957e-3098-435b-b7da-3394d6eb8600",
+                           [user_prompt(self.root, "add retry to webhook sender")])
+
+        with mock.patch("subprocess.run", side_effect=fake_fzf("", returncode=130)) as fzf:
+            self.run_main([], fzf="/usr/local/bin/fzf")
+
+        self.assertNotIn("--bind", fzf.call_args.args[0])
+
+    def test_folder_toggle_needs_fzf_0_70_or_later(self):
+        versions = ["0.44.1", "0.69.9", "0.70.0", "0.74.4", "1.0", "unknown", "HEAD-1f2e3d4"]
+
+        self.assertEqual([claude_resume.has_folder_toggle(v) for v in versions],
+                         [False, False, True, True, True, False, False])
+
     def test_main_picks_with_fzf_when_installed_and_resumes_the_selection(self):
         sub = self.root + "/checkout-api"
         self.write_session(self.root, "a3af957e-3098-435b-b7da-3394d6eb8600",
                            [user_prompt(self.root, "add retry to webhook sender")], mtime=1000)
         self.write_session(sub, "6e2738aa-7c4c-4b94-b9af-05c33c3a42ab",
                            [user_prompt(sub, "fix timezone bug in invoice dates")], mtime=2000)
-        picked = "a3af957e-3098-435b-b7da-3394d6eb8600\t01-01 00:16  add retry to webhook sender\n"
+        picked = fzf_line("a3af957e-3098-435b-b7da-3394d6eb8600", "01-01 00:16",
+                          "add retry to webhook sender", "~/src/webshop", "webshop")
 
         with mock.patch("subprocess.run", side_effect=fake_fzf("0.70.0 (brew)", picked=picked)) as fzf:
             _, prompts, execvp, chdir, _ = self.run_main([], fzf="/opt/homebrew/bin/fzf")
@@ -662,6 +729,32 @@ class ClaudeResumeTest(unittest.TestCase):
 
         self.assertEqual([s["summary"] for s in self.search()], ["Webhook retry sender"])
 
+    def test_opens_an_index_where_an_earlier_run_added_only_the_name_column(self):
+        old = sqlite3.connect(self.db_path)
+        old.executescript("""
+            CREATE TABLE sessions (id TEXT PRIMARY KEY, cwd TEXT NOT NULL, title TEXT NOT NULL, summary TEXT,
+                                   mtime REAL NOT NULL, deleted INTEGER NOT NULL, source_mtime REAL,
+                                   summary_mtime REAL, name TEXT);
+            CREATE VIRTUAL TABLE search USING fts5(title, summary, text, tokenize='trigram');
+            INSERT INTO sessions VALUES ('a3af957e-3098-435b-b7da-3394d6eb8600',
+                '/Users/alex/src/webshop', 'webhook-retry', NULL, 1000, 0, 1000, NULL, NULL);
+            INSERT INTO search (rowid, title, summary, text)
+                VALUES (1, 'webhook-retry', NULL, 'add retry to webhook sender');
+        """)
+        old.close()
+        self.write_session(self.root, "a3af957e-3098-435b-b7da-3394d6eb8600", [
+            {"type": "custom-title", "customTitle": "webhook-retry",
+             "sessionId": "a3af957e-3098-435b-b7da-3394d6eb8600"},
+            {"type": "agent-name", "agentName": "webhook-retry", "sessionId": "a3af957e-3098-435b-b7da-3394d6eb8600"},
+            {"type": "agent-color", "agentColor": "cyan", "sessionId": "a3af957e-3098-435b-b7da-3394d6eb8600"},
+            user_prompt(self.root, "add retry to webhook sender"),
+        ], mtime=1000)
+
+        sessions = self.search()
+
+        self.assertEqual([(s["name"], s["color"], s["title"]) for s in sessions],
+                         [("webhook-retry", "cyan", "add retry to webhook sender")])
+
     def test_rereads_transcripts_indexed_before_names_and_colors_were_tracked(self):
         old = sqlite3.connect(self.db_path)
         old.executescript("""
@@ -807,6 +900,11 @@ def fake_fzf(version, picked="", returncode=0):
             return CompletedProcess(args, 0, stdout=f"{version}\n")
         return CompletedProcess(args, returncode, stdout=picked)
     return run
+
+
+def fzf_line(session_id, when, title, path, folder):
+    row = f"{when}  {'':<32}  {title:<50}  "
+    return f"{session_id}\t{row}[{path}]\t{row}[{folder}]\n"
 
 
 def listed_numbers(output):
