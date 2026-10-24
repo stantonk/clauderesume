@@ -23,6 +23,7 @@ from pathlib import Path
 
 PAGE_SIZE = 20
 NAME_WIDTH = 32
+FZF_MIN_VERSION = (0, 70)  # change-with-nth, which switches the folder column
 TITLE_WIDTH = 50
 # ANSI codes for the colors that /color sets in Claude Code.
 COLORS = {"red": "31", "green": "32", "yellow": "33", "blue": "34", "purple": "35", "cyan": "36",
@@ -310,6 +311,19 @@ def fzf_warning_enabled():
         return True
 
 
+def fzf_version(fzf):
+    """The version fzf prints, like "0.74.4"."""
+    output = subprocess.run([fzf, "--version"], capture_output=True, text=True).stdout.split()
+    return output[0] if output else "unknown"
+
+
+def has_folder_toggle(version):
+    try:
+        return tuple(int(part) for part in version.split(".")[:2]) >= FZF_MIN_VERSION
+    except ValueError:
+        return False
+
+
 def format_row(session, color=False, full_path=False):
     name = truncate(session["name"] or "", NAME_WIDTH)
     padding = " " * (NAME_WIDTH - len(name))
@@ -453,12 +467,14 @@ def main(argv=None):
     if summarize:
         summarize_pending(summarize)
     fzf = shutil.which("fzf")
-    if sys.stdout.isatty() and fzf:
+    version = fzf_version(fzf) if fzf and sys.stdout.isatty() else None
+    if version and has_folder_toggle(version):
         session = pick_with_fzf(sessions)
     else:
-        if not fzf and fzf_warning_enabled():
-            print("fzf isn't installed, so here's a numbered list instead. "
-                  "Install fzf (https://github.com/junegunn/fzf) to search as you type, "
+        if fzf_warning_enabled() and (not fzf or version):
+            problem = f"fzf {version} is older than 0.70" if fzf else "fzf isn't installed"
+            print(f"{problem}, so here's a numbered list instead. "
+                  f"{'Update' if fzf else 'Install'} fzf (https://github.com/junegunn/fzf) to search as you type, "
                   "or set fzf_warning = off under [picker] in claude-resume.conf to hide this.", file=sys.stderr)
             time.sleep(1)
         session = pick_with_pager(sessions, terms)

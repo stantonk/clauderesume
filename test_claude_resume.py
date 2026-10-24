@@ -333,7 +333,7 @@ class ClaudeResumeTest(unittest.TestCase):
     def test_main_does_not_warn_about_fzf_when_it_is_installed(self):
         self.write_numbered_sessions(3)
 
-        with mock.patch("subprocess.run", return_value=CompletedProcess([], 130, stdout="")), \
+        with mock.patch("subprocess.run", side_effect=fake_fzf("0.74.4 (Homebrew)", returncode=130)), \
                 redirect_stderr(io.StringIO()) as err:
             self.run_main([], fzf="/opt/homebrew/bin/fzf")
 
@@ -439,6 +439,31 @@ class ClaudeResumeTest(unittest.TestCase):
         self.assertEqual(plain, [row.replace("\x1b[38;5;208m", "").replace("\x1b[35m", "").replace("\x1b[0m", "")
                                  for row in colored])
 
+    def test_main_warns_and_pages_when_fzf_is_older_than_0_70(self):
+        self.write_numbered_sessions(3)
+
+        with mock.patch("subprocess.run", side_effect=fake_fzf("0.44.1 (debian)")) as fzf, \
+                redirect_stderr(io.StringIO()) as err:
+            out, _, _, _, _ = self.run_main(["q"], fzf="/usr/bin/fzf")
+
+        self.assertEqual(listed_numbers(out), [1, 2, 3])
+        self.assertIn("fzf 0.44.1 is older than 0.70, so here's a numbered list instead. Update fzf", err.getvalue())
+        self.assertIn("fzf_warning = off", err.getvalue())
+        self.sleep.assert_called_once_with(1)
+        fzf.assert_called_once_with(["/usr/bin/fzf", "--version"], capture_output=True, text=True)
+
+    def test_main_skips_the_old_fzf_warning_when_turned_off_in_the_conf(self):
+        self.write_numbered_sessions(3)
+        self.write_conf("[summarize]\nprovider = none\n\n[picker]\nfzf_warning = off\n")
+
+        with mock.patch("subprocess.run", side_effect=fake_fzf("0.44.1 (debian)")), \
+                redirect_stderr(io.StringIO()) as err:
+            out, _, _, _, _ = self.run_main(["q"], fzf="/usr/bin/fzf")
+
+        self.assertEqual(listed_numbers(out), [1, 2, 3])
+        self.assertNotIn("fzf", err.getvalue())
+        self.sleep.assert_not_called()
+
     def test_main_picks_with_fzf_when_installed_and_resumes_the_selection(self):
         sub = self.root + "/checkout-api"
         self.write_session(self.root, "a3af957e-3098-435b-b7da-3394d6eb8600",
@@ -447,7 +472,7 @@ class ClaudeResumeTest(unittest.TestCase):
                            [user_prompt(sub, "fix timezone bug in invoice dates")], mtime=2000)
         picked = "a3af957e-3098-435b-b7da-3394d6eb8600\t01-01 00:16  add retry to webhook sender\n"
 
-        with mock.patch("subprocess.run", return_value=CompletedProcess([], 0, stdout=picked)) as fzf:
+        with mock.patch("subprocess.run", side_effect=fake_fzf("0.70.0 (brew)", picked=picked)) as fzf:
             _, prompts, execvp, chdir, _ = self.run_main([], fzf="/opt/homebrew/bin/fzf")
 
         lines = [line.split("\t") for line in fzf.call_args.kwargs["input"].splitlines()]
@@ -468,7 +493,7 @@ class ClaudeResumeTest(unittest.TestCase):
         self.write_session(self.root, "a3af957e-3098-435b-b7da-3394d6eb8600",
                            [user_prompt(self.root, "add retry to webhook sender")])
 
-        with mock.patch("subprocess.run", return_value=CompletedProcess([], 130, stdout="")):
+        with mock.patch("subprocess.run", side_effect=fake_fzf("0.74.4 (Homebrew)", returncode=130)):
             _, _, execvp, _, status = self.run_main([], fzf="/opt/homebrew/bin/fzf")
 
         self.assertEqual(status, 0)
@@ -783,6 +808,14 @@ def assistant_reply(cwd, text):
             "message": {"role": "assistant", "content": [{"type": "thinking", "thinking": ""},
                                                          {"type": "text", "text": text}]},
             "timestamp": "2026-01-05T09:12:07.231Z", "cwd": cwd}
+
+
+def fake_fzf(version, picked="", returncode=0):
+    def run(args, **kwargs):
+        if args[1:] == ["--version"]:
+            return CompletedProcess(args, 0, stdout=f"{version}\n")
+        return CompletedProcess(args, returncode, stdout=picked)
+    return run
 
 
 def listed_numbers(output):
