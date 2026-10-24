@@ -28,7 +28,7 @@ clauderesume webhook retry     # only sessions whose title or conversation conta
 ```
 
 With [fzf](https://github.com/junegunn/fzf) installed, you pick in fzf: type to fuzzy-filter by
-date, title and folder, with a preview of the folder's
+date, session name (from `/rename`, shown in its `/color`), title and folder, with a preview of the folder's
 README.md, or the session's conversation when it has none. Enter `cd`s into that
 session's directory and runs `claude --resume <id>`; Esc quits. Search terms on the command line
 narrow the list by full conversation text first.
